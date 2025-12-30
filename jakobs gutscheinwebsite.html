@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gutschein-App – Fix §∞</title>
+<style>
+  body{font-family:'Segoe UI',Arial,sans-serif;margin:0;min-height:100vh;display:flex;justify-content:center;align-items:flex-start;background:linear-gradient(to bottom,#a6dcef,#f3c7d9);}
+  .card{background:white;padding:30px;border-radius:16px;width:90%;max-width:700px;margin-top:50px;box-shadow:0 10px 25px rgba(0,0,0,0.15);}
+  h2,h3{text-align:center;margin-top:0;color:#333;}
+  input[type=text],input[type=password],input[type=number],select,button{width:100%;padding:12px;margin:6px 0;box-sizing:border-box;border:2px solid #ccc;border-radius:8px;font-size:16px;transition:0.2s;}
+  input:focus{border-color:#4CAF50;outline:none;}
+  button{background:#4CAF50;color:white;border:none;border-radius:8px;padding:12px 0;cursor:pointer;font-weight:bold;transition:0.3s;}
+  button:hover{background:#45a049;}
+  .smallBtn{background:#f44336;color:white;border:none;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:14px;}
+  .smallBtn:hover{background:#d73833;}
+  .checkboxRow{display:flex;align-items:center;gap:8px;margin:6px 0;}
+  ul{list-style:none;padding:0;margin:0;max-height:250px;overflow-y:auto;}
+  li.entry{background:#e6f4ea;margin:6px 0;padding:10px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;transition:0.2s;}
+  li.entry:hover{background:#d0eed8;}
+  .col{display:flex;gap:12px;flex-wrap:wrap;}
+  .col>div{flex:1;}
+  .muted{color:#666;font-size:14px;text-align:center;}
+</style>
+</head>
+<body>
+
+<div id="loginBereich" class="card">
+<h2>Login</h2>
+<input id="benutzername" type="text" placeholder="Benutzername">
+<input id="passwort" type="password" placeholder="Passwort">
+<div class="checkboxRow"><input id="passwortZeigen" type="checkbox"><label for="passwortZeigen">Passwort anzeigen</label></div>
+<div id="loginFehler" class="muted"></div>
+<button onclick="login()">Einloggen</button>
+<p class="muted">Admin zum Testen: <b>jakob / jakob</b></p>
+</div>
+
+<div id="appBereich" class="card" style="display:none;">
+<h2>Gutschein-App</h2>
+<button onclick="logout()">Logout</button>
+<h3>Willkommen, <span id="aktuellerName"></span>!</h3>
+<p><strong>Guthaben:</strong> <span id="aktuellesGuthaben">0</span> §</p>
+
+<div id="sendeBereich">
+<input id="gutscheinText" type="text" placeholder="Gutschein-Text (z.B. '10% Rabatt')">
+<div class="col">
+<div><select id="empfaengerSelect"></select></div>
+<div><input id="betrag" type="number" placeholder="Betrag (§) optional"></div>
+</div>
+<button onclick="senden()">Gutschein / § senden</button>
+</div>
+
+<div style="margin-top:16px">
+<h3>Gesendete Gutscheine</h3>
+<ul id="gesendeteListe"></ul>
+</div>
+
+<div style="margin-top:16px">
+<h3>Zugewiesene Gutscheine</h3>
+<ul id="zugewieseneListe"></ul>
+</div>
+
+<div id="adminBereich" style="display:none;margin-top:16px">
+<h3>Admin - Benutzerverwaltung</h3>
+<input id="neuerName" type="text" placeholder="Neuer Benutzername">
+<input id="neuesPasswort" type="password" placeholder="Passwort">
+<div class="checkboxRow"><input id="adminCheck" type="checkbox"><label for="adminCheck">Ist Admin</label></div>
+<div class="checkboxRow"><input id="loeschenCheck" type="checkbox"><label for="loeschenCheck">Darf Benutzer löschen</label></div>
+<button onclick="neuenBenutzerErstellen()">Benutzer hinzufügen</button>
+<div id="adminInfo" class="muted"></div>
+<h3 style="margin-top:12px">Alle Benutzer</h3>
+<ul id="benutzerListe"></ul>
+</div>
+
+<script>
+// Lade Benutzer aus LocalStorage, Infinity als String konvertieren
+let benutzerListe = JSON.parse(localStorage.getItem('benutzerListe')) || [
+  {name:'jakob',passwort:'jakob',senden:true,zugewiesene:[],gesendete:[],guthaben:'Infinity',isAdmin:true,darfLoeschen:true},
+  {name:'ellen',passwort:'ellen123',senden:true,zugewiesene:[],gesendete:[],guthaben:50,isAdmin:false,darfLoeschen:false}
+];
+benutzerListe.forEach(b => { if(b.guthaben==='Infinity') b.guthaben=Infinity; });
+
+// Passwort anzeigen
+passwortZeigen.addEventListener('change', e => { passwort.type = e.target.checked?'text':'password'; });
+
+// LocalStorage speichern & Tab-Sync
+function speichereBenutzer(){ 
+  localStorage.setItem('benutzerListe', JSON.stringify(benutzerListe.map(b=>{
+    return {...b, guthaben:b.guthaben===Infinity?'Infinity':b.guthaben};
+  })));
+}
+setInterval(speichereBenutzer,5000);
+window.addEventListener('storage', e=>{
+  if(e.key==='benutzerListe'){
+    benutzerListe=JSON.parse(e.newValue)||[];
+    benutzerListe.forEach(b => { if(b.guthaben==='Infinity') b.guthaben=Infinity; });
+    aktualisiereEmpfaengerSelect(); aktualisiereBenutzerListe(); aktualisiereZugewieseneListe(); aktualisiereGesendeteListe();
+    aktualisiereAnzeigeGuthaben();
+  }
+});
+
+// Login
+function login(){
+  const user=benutzername.value.trim(), pwd=passwort.value.trim();
+  const gefunden=benutzerListe.find(b=>b.name===user && b.passwort===pwd);
+  if(!gefunden){ loginFehler.textContent='Benutzername oder Passwort falsch!'; return; }
+  loginFehler.textContent=''; aktuellerBenutzer=gefunden;
+  loginBereich.style.display='none'; appBereich.style.display='block';
+  aktuellerName.textContent=aktuellerBenutzer.name;
+  adminBereich.style.display=aktuellerBenutzer.isAdmin?'block':'none';
+  if(aktuellerBenutzer.isAdmin) aktuellerBenutzer.guthaben=Infinity;
+  aktualisiereAnzeigeGuthaben();
+  aktualisiereEmpfaengerSelect(); aktualisiereZugewieseneListe(); aktualisiereGesendeteListe(); aktualisiereBenutzerListe();
+}
+
+function aktualisiereAnzeigeGuthaben(){ aktuellesGuthaben.textContent=aktuellerBenutzer.guthaben===Infinity?'∞':aktuellerBenutzer.guthaben; }
+function logout(){ location.reload(); }
+
+// Senden
+function senden(){
+  if(!aktuellerBenutzer) return alert('Bitte einloggen!');
+  const text=gutscheinText.value.trim(), empName=empfaengerSelect.value;
+  const betrag=betrag.value?Number(betrag.value):0;
+  if(!text && !betrag) return alert('Bitte Text oder Betrag eingeben');
+  if(!empName) return alert('Bitte Empfänger wählen');
+  const emp=benutzerListe.find(b=>b.name===empName); if(!emp) return;
+  if(!aktuellerBenutzer.senden && !aktuellerBenutzer.isAdmin) return alert('Du darfst keine Gutscheine senden!');
+  if(betrag>0 && aktuellerBenutzer.guthaben!==Infinity && aktuellerBenutzer.guthaben<betrag) return alert('Nicht genug Guthaben!');
+  if(betrag>0 && aktuellerBenutzer.guthaben!==Infinity) aktuellerBenutzer.guthaben-=betrag;
+  emp.guthaben=emp.guthaben===Infinity?Infinity:emp.guthaben+betrag;
+  const eintrag={von:aktuellerBenutzer.name,an:emp.name,text,betrag};
+  emp.zugewiesene.push(eintrag); aktuellerBenutzer.gesendete.push(eintrag);
+  speichereBenutzer();
+  gutscheinText.value=''; betrag.value='';
+  aktualisiereGesendeteListe(); aktualisiereZugewieseneListe(); aktualisiereBenutzerListe(); aktualisiereAnzeigeGuthaben();
+}
+
+// Gesendete Gutscheine
+function aktualisiereGesendeteListe(){
+  gesendeteListe.innerHTML=''; if(!aktuellerBenutzer) return;
+  aktuellerBenutzer.gesendete.forEach((g,idx)=>{
+    const li=document.createElement('li'); li.className='entry';
+    const txt=document.createElement('div'); txt.textContent=`An ${g.an} ${g.betrag?'('+g.betrag+' §) ':''}: ${g.text||'(kein Text)'}`;
+    const btn=document.createElement('button'); btn.className='smallBtn'; btn.textContent='Eingelöst';
+    btn.onclick=()=>{
+      const emp=benutzerListe.find(b=>b.name===g.an);
+      if(emp) emp.zugewiesene=emp.zugewiesene.filter(e=>!(e.von===g.von && e.an===g.an && e.text===g.text && e.betrag===g.betrag));
+      aktuellerBenutzer.gesendete.splice(idx,1);
+      speichereBenutzer();
+      aktualisiereGesendeteListe(); aktualisiereZugewieseneListe();
+    };
+    li.appendChild(txt); li.appendChild(btn); gesendeteListe.appendChild(li);
+  });
+}
+
+// Zugewiesene Gutscheine
+function aktualisiereZugewieseneListe(){
+  zugewieseneListe.innerHTML=''; if(!aktuellerBenutzer) return;
+  aktuellerBenutzer.zugewiesene.forEach(g=>{
+    const li=document.createElement('li'); li.className='entry';
+    li.textContent=`Von ${g.von} ${g.betrag?'('+g.betrag+' §) ':''}: ${g.text||'(kein Text)'}`;
+    zugewieseneListe.appendChild(li);
+  });
+}
+
+// Admin: neuer Benutzer
+function neuenBenutzerErstellen(){
+  const name=neuerName.value.trim(), pwd=neuesPasswort.value.trim();
+  const istAdmin=adminCheck.checked, darfLoeschen=loeschenCheck.checked;
+  if(!name||!pwd) return alert('Bitte Name & Passwort eingeben');
+  if(benutzerListe.some(b=>b.name===name)) return alert('Name existiert bereits');
+  benutzerListe.push({name,passwort:pwd,senden:true,zugewiesene:[],gesendete:[],guthaben:istAdmin?Infinity:0,isAdmin:istAdmin,darfLoeschen:darfLoeschen});
+  speichereBenutzer(); neuerName.value=''; neuesPasswort.value=''; adminCheck.checked=false; loeschenCheck.checked=false;
+  adminInfo.textContent=`Benutzer "${name}" erstellt.`;
+  aktualisiereEmpfaengerSelect(); aktualisiereBenutzerListe();
+}
+
+// Benutzerliste
+function aktualisiereBenutzerListe(){
+  const container=document.getElementById('benutzerListe'); container.innerHTML='';
+  benutzerListe.forEach((b,idx)=>{
+    const li=document.createElement('li'); li.className='entry';
+    const txt=document.createElement('div'); txt.textContent=`${b.name} — Guthaben: ${b.guthaben===Infinity?'∞':b.guthaben} § ${b.isAdmin?'(Admin)':''} ${b.darfLoeschen?'(Darf löschen)':''}`;
+    li.appendChild(txt);
+    const darf=aktuellerBenutzer && (aktuellerBenutzer.isAdmin || aktuellerBenutzer.darfLoeschen);
+    if(darf && !b.isAdmin && aktuellerBenutzer.name!==b.name){
+      const btn=document.createElement('button'); btn.className='smallBtn'; btn.textContent='Löschen';
+      btn.onclick=()=>{ if(confirm(`Benutzer ${b.name} löschen?`)){ benutzerListe.splice(idx,1); speichereBenutzer(); aktualisiereEmpfaengerSelect(); aktualisiereBenutzerListe(); } };
+      li.appendChild(btn);
+    }
+    container.appendChild(li);
+  });
+}
+
+// Empfänger-Auswahl
+function aktualisiereEmpfaengerSelect(){
+  const sel=document.getElementById('empfaengerSelect'); sel.innerHTML='';
+  if(!aktuellerBenutzer) return;
+  benutzerListe.forEach(b=>{ if(b.name!==aktuellerBenutzer.name){ const opt=document.createElement('option'); opt.value=b.name; opt.textContent=b.name; sel.appendChild(opt); }});
+}
+</script>
+</body>
+</html>
